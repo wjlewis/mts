@@ -1,0 +1,7 @@
+{
+  "name": "mts",
+  "devDependencies": {
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}
