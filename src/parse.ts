@@ -21,13 +21,23 @@ import Lexer, { Type as TT } from './Lexer';
 //          | "[" Pattern*{","} "]"
 //          | "(" Pattern ")"
 
-export type Item = Def | Term;
+export type Item = DefItem | TermItem;
 
-export interface Def {
-  type: Type.def;
+export interface DefItem {
+  type: ItemType.def;
   name: string;
   patterns: Pattern[];
   body: Term;
+}
+
+export interface TermItem {
+  type: ItemType.term;
+  term: Term;
+}
+
+export enum ItemType {
+  def = 'def',
+  term = 'term',
 }
 
 export type Term =
@@ -39,50 +49,41 @@ export type Term =
   | ListTerm
   | MatchTerm;
 
-export type Pattern =
-  | TreePattern
-  | WildcardPattern
-  | VarPattern
-  | AsPattern
-  | ConsPattern
-  | StringPattern
-  | ListPattern;
-
 export interface TreeTerm {
-  type: Type.treeTerm;
+  type: TermType.tree;
   functor: string;
   children: Term[];
 }
 
 export interface VarTerm {
-  type: Type.varTerm;
+  type: TermType.var;
   text: string;
 }
 
 export interface AppTerm {
-  type: Type.appTerm;
+  type: TermType.app;
   opName: string;
   rands: Term[];
 }
 
 export interface ConsTerm {
-  type: Type.consTerm;
+  type: TermType.cons;
   head: Term;
   tail: Term;
 }
 
 export interface StringTerm {
-  type: Type.stringTerm;
+  type: TermType.string;
   text: string;
 }
 
 export interface ListTerm {
-  type: Type.listTerm;
+  type: TermType.list;
   elts: Term[];
 }
 
 export interface MatchTerm {
-  type: Type.matchTerm;
+  type: TermType.match;
   terms: Term[];
   clauses: MatchClause[];
 }
@@ -92,61 +93,70 @@ export interface MatchClause {
   body: Term;
 }
 
+export enum TermType {
+  tree = 'tree',
+  var = 'var',
+  app = 'app',
+  cons = 'cons',
+  string = 'string',
+  list = 'list',
+  match = 'match',
+}
+
+export type Pattern =
+  | TreePattern
+  | WildcardPattern
+  | VarPattern
+  | AsPattern
+  | ConsPattern
+  | StringPattern
+  | ListPattern;
+
 export interface TreePattern {
-  type: Type.treePattern;
+  type: PatternType.tree;
   functor: string;
   children: Pattern[];
 }
 
 export interface VarPattern {
-  type: Type.varPattern;
+  type: PatternType.var;
   text: string;
 }
 
 export interface WildcardPattern {
-  type: Type.wildcardPattern;
+  type: PatternType.wildcard;
 }
 
 export interface AsPattern {
-  type: Type.asPattern;
+  type: PatternType.as;
   name: string;
   pattern: Pattern;
 }
 
 export interface ConsPattern {
-  type: Type.consPattern;
+  type: PatternType.cons;
   head: Pattern;
   tail: Pattern;
 }
 
 export interface StringPattern {
-  type: Type.stringPattern;
+  type: PatternType.string;
   text: string;
 }
 
 export interface ListPattern {
-  type: Type.listPattern;
+  type: PatternType.list;
   elts: Pattern[];
 }
 
-export enum Type {
-  def = 'def',
-
-  treeTerm = 'treeTerm',
-  varTerm = 'varTerm',
-  appTerm = 'appTerm',
-  consTerm = 'consTerm',
-  stringTerm = 'stringTerm',
-  listTerm = 'listTerm',
-  matchTerm = 'matchTerm',
-
-  treePattern = 'treePattern',
-  varPattern = 'varPattern',
-  wildcardPattern = 'wildcardPattern',
-  asPattern = 'asPattern',
-  consPattern = 'consPattern',
-  stringPattern = 'stringPattern',
-  listPattern = 'listPattern',
+export enum PatternType {
+  tree = 'tree',
+  var = 'var',
+  wildcard = 'wildcard',
+  as = 'as',
+  cons = 'cons',
+  string = 'string',
+  list = 'list',
 }
 
 export function parseProgram(l: Lexer): Item[] {
@@ -164,11 +174,11 @@ export function parseItem(l: Lexer): Item {
   if (l.peek().type === TT.letKw) {
     return parseDef(l);
   } else {
-    return parseTerm(l);
+    return { type: ItemType.term, term: parseTerm(l) };
   }
 }
 
-export function parseDef(l: Lexer): Def {
+export function parseDef(l: Lexer): DefItem {
   l.expect(TT.letKw);
   const name = l.expect(TT.ident).text;
 
@@ -184,7 +194,7 @@ export function parseDef(l: Lexer): Def {
   const body = parseTerm(l);
 
   return {
-    type: Type.def,
+    type: ItemType.def,
     patterns,
     name,
     body,
@@ -197,7 +207,7 @@ export function parseTerm(l: Lexer): Term {
   while (l.hasMore() && l.peek().type === TT.colon) {
     l.pop();
     term = {
-      type: Type.consTerm,
+      type: TermType.cons,
       head: term,
       tail: parseTerm(l),
     };
@@ -213,7 +223,7 @@ function parseTerm1(l: Lexer): Term {
     return parseTreeOrVarOrApp(l);
   } else if (peeked.type === TT.string) {
     return {
-      type: Type.stringTerm,
+      type: TermType.string,
       text: getStringText(l.pop().text),
     };
   } else if (peeked.type === TT.lBracket) {
@@ -221,7 +231,7 @@ function parseTerm1(l: Lexer): Term {
     const elts = parseCommaSep(l, parseTerm, [TT.rBracket]);
     l.expect(TT.rBracket);
     return {
-      type: Type.listTerm,
+      type: TermType.list,
       elts,
     };
   } else if (peeked.type === TT.lParen) {
@@ -251,19 +261,19 @@ function parseTreeOrVarOrApp(l: Lexer): Term {
   if (start.type === TT.ident) {
     if (terms.length > 0) {
       return {
-        type: Type.appTerm,
+        type: TermType.app,
         opName: text,
         rands: terms,
       };
     } else {
       return {
-        type: Type.varTerm,
+        type: TermType.var,
         text,
       };
     }
   } else {
     return {
-      type: Type.treeTerm,
+      type: TermType.tree,
       functor: text,
       children: terms,
     };
@@ -278,7 +288,7 @@ function parseMatchTerm(l: Lexer): Term {
   l.expect(TT.rCurly);
 
   return {
-    type: Type.matchTerm,
+    type: TermType.match,
     terms,
     clauses,
   };
@@ -298,7 +308,7 @@ export function parsePattern(l: Lexer): Pattern {
   while (l.hasMore() && l.peek().type === TT.colon) {
     l.pop();
     pat = {
-      type: Type.consPattern,
+      type: PatternType.cons,
       head: pat,
       tail: parsePattern(l),
     };
@@ -314,12 +324,12 @@ function parsePattern1(l: Lexer): Pattern {
     return parseTreePattern(l);
   } else if (peeked.type === TT.wildcard) {
     l.pop();
-    return { type: Type.wildcardPattern };
+    return { type: PatternType.wildcard };
   } else if (peeked.type === TT.ident) {
     return parseVarOrAsPattern(l);
   } else if (peeked.type === TT.string) {
     return {
-      type: Type.stringPattern,
+      type: PatternType.string,
       text: getStringText(l.pop().text),
     };
   } else if (peeked.type === TT.lBracket) {
@@ -327,7 +337,7 @@ function parsePattern1(l: Lexer): Pattern {
     const elts = parseCommaSep(l, parsePattern, [TT.rBracket]);
     l.expect(TT.rBracket);
     return {
-      type: Type.listPattern,
+      type: PatternType.list,
       elts,
     };
   } else if (peeked.type === TT.lParen) {
@@ -353,7 +363,7 @@ function parseTreePattern(l: Lexer): Pattern {
   }
 
   return {
-    type: Type.treePattern,
+    type: PatternType.tree,
     functor: text,
     children,
   };
@@ -365,13 +375,13 @@ function parseVarOrAsPattern(l: Lexer): Pattern {
   if (l.hasMore() && l.peek().type === TT.amp) {
     l.pop();
     return {
-      type: Type.asPattern,
+      type: PatternType.as,
       name: text,
       pattern: parsePattern(l),
     };
   } else {
     return {
-      type: Type.varPattern,
+      type: PatternType.var,
       text,
     };
   }
