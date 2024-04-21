@@ -3,19 +3,22 @@ import * as P from './lower';
 const builtIns = ['print'];
 
 export function checkProgram(items: P.Item[]) {
-  const defNames = items
-    .filter<P.DefItem>(
-      (item): item is P.DefItem => item.type === P.ItemType.def
-    )
+  const opNames = items
+    .filter<P.FnItem>((item): item is P.FnItem => item.type === P.ItemType.fn)
     .map(({ name }) => name);
 
-  const bound = [...builtIns, ...defNames];
+  const bound = [...builtIns, ...opNames];
 
   for (const item of items) {
     switch (item.type) {
-      case P.ItemType.def:
+      case P.ItemType.fn:
         checkDef(item, bound);
         break;
+      case P.ItemType.let: {
+        const boundIn = checkLet(item, bound);
+        bound.push(...boundIn);
+        break;
+      }
       case P.ItemType.term:
         checkTerm(item.term, bound);
         break;
@@ -23,9 +26,17 @@ export function checkProgram(items: P.Item[]) {
   }
 }
 
-function checkDef(def: P.DefItem, bound: string[]) {
+function checkDef(def: P.FnItem, bound: string[]) {
   const { clauses } = def;
+
   checkMatchClauses(clauses, bound);
+}
+
+function checkLet(item: P.LetItem, bound: string[]): string[] {
+  const { pattern, term } = item;
+
+  checkTerm(term, bound);
+  return varsIn(pattern);
 }
 
 function checkTerm(term: P.Term, bound: string[]) {
@@ -33,6 +44,7 @@ function checkTerm(term: P.Term, bound: string[]) {
     case P.TermType.tree: {
       return checkTerms(term.children, bound);
     }
+
     case P.TermType.var: {
       const { text } = term;
       if (!bound.includes(text)) {
@@ -40,6 +52,7 @@ function checkTerm(term: P.Term, bound: string[]) {
       }
       return;
     }
+
     case P.TermType.app: {
       const { opName, rands } = term;
       if (!bound.includes(opName)) {
@@ -47,6 +60,7 @@ function checkTerm(term: P.Term, bound: string[]) {
       }
       return checkTerms(rands, bound);
     }
+
     case P.TermType.match: {
       const { terms, clauses } = term;
       checkTerms(terms, bound);

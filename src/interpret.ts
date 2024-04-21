@@ -1,171 +1,12 @@
 import * as P from './lower';
 import { zip } from './tools';
 
-export default function interpret(items: P.Item[]) {
-  const ops: Ops = {
-    print: {
-      type: OpType.builtIn,
-      fn: (...terms) => {
-        console.log(...terms.map(term => JSON.stringify(term, null, 2)));
-        return {
-          type: P.TermType.tree,
-          functor: P.internalNil,
-          children: [],
-        };
-      },
-    },
-  };
-
-  for (const item of items) {
-    switch (item.type) {
-      case P.ItemType.def: {
-        const { name, clauses } = item;
-        ops[name] = {
-          type: OpType.def,
-          name,
-          clauses,
-        };
-        break;
-      }
-      case P.ItemType.term: {
-        const { term } = item;
-        interpretTerm(term, Env.empty(), ops);
-        break;
-      }
-    }
-  }
+export interface Value {
+  functor: string | symbol;
+  children: Value[];
 }
 
-function interpretTerm(term: P.Term, env: Env, ops: Ops): P.Term {
-  switch (term.type) {
-    case P.TermType.tree: {
-      const { functor, children } = term;
-
-      return {
-        type: P.TermType.tree,
-        functor,
-        children: children.map(child => interpretTerm(child, env, ops)),
-      };
-    }
-    case P.TermType.var: {
-      const { text } = term;
-
-      try {
-        return env.lookup(text);
-      } catch (err) {
-        if (text in ops) {
-          const op = ops[text];
-          if (
-            op.type === OpType.def &&
-            op.clauses[0] &&
-            op.clauses[0].patterns.length === 0
-          ) {
-            return interpretTerm(op.clauses[0].body, env, ops);
-          }
-        }
-        throw err;
-      }
-    }
-    case P.TermType.app: {
-      const { opName, rands } = term;
-
-      const args = rands.map(rand => interpretTerm(rand, env, ops));
-      const op = ops[opName];
-
-      return applyOp(op, args, env, ops);
-    }
-    case P.TermType.match: {
-      const { terms, clauses } = term;
-
-      const args = terms.map(term => interpretTerm(term, env, ops));
-      for (const clause of clauses) {
-        const { patterns, body } = clause;
-        const s = matchAll(patterns, args, {});
-        if (s) {
-          return interpretTerm(body, env.extend(s), ops);
-        }
-      }
-
-      throw new Error('pattern match failure');
-    }
-  }
-}
-
-function matchAll(pats: P.Pattern[], terms: P.Term[], s: Subst): Subst | null {
-  return zip(pats, terms).reduce((s, [pat, term]) => {
-    if (s === null) {
-      return null;
-    } else {
-      return match(pat, term, s);
-    }
-  }, s as Subst | null);
-}
-
-function match(pat: P.Pattern, term: P.Term, s: Subst): Subst | null {
-  switch (pat.type) {
-    case P.PatternType.tree: {
-      if (term.type === P.TermType.tree && pat.functor === term.functor) {
-        return matchAll(pat.children, term.children, s);
-      } else {
-        return null;
-      }
-    }
-    case P.PatternType.var: {
-      const { text } = pat;
-      if (text in s) {
-        // Should these only ever be ground terms?
-        return eqTerms(term, s[text]) ? s : null;
-      } else {
-        return { ...s, [text]: term };
-      }
-    }
-    case P.PatternType.wildcard: {
-      return s;
-    }
-    case P.PatternType.as: {
-      const { name, pattern } = pat;
-      const s1 = match(pattern, term, s);
-      if (s1) {
-        const v = { type: P.PatternType.var as const, text: name };
-        return match(v, term, s1);
-      } else {
-        return null;
-      }
-    }
-  }
-}
-
-function eqTerms(t: P.Term, u: P.Term): boolean {
-  if (t.type === P.TermType.tree && u.type === P.TermType.tree) {
-    return (
-      t.functor === u.functor &&
-      zip(t.children, u.children).every(([t, u]) => eqTerms(t, u))
-    );
-  } else {
-    return false;
-  }
-}
-
-type Subst = { [name: string]: P.Term };
-
-function applyOp(op: Op, args: P.Term[], env: Env, ops: Ops): P.Term {
-  switch (op.type) {
-    case OpType.builtIn:
-      return op.fn(...args);
-    case OpType.def: {
-      for (const clause of op.clauses) {
-        const { patterns, body } = clause;
-        const s = matchAll(patterns, args, {});
-
-        if (s) {
-          return interpretTerm(body, env.extend(s), ops);
-        }
-      }
-
-      throw new Error(`pattern match failure: ${op.name}`);
-    }
-  }
-}
+type Subst = { [name: string]: Value };
 
 class Env {
   constructor(private bindings: Subst, private base: Env | null = null) {}
@@ -174,7 +15,13 @@ class Env {
     return new Env({});
   }
 
-  lookup(name: string): P.Term {
+  define(subst: Subst) {
+    for (const [name, value] of Object.entries(subst)) {
+      this.bindings[name] = value;
+    }
+  }
+
+  lookup(name: string): Value {
     if (name in this.bindings) {
       return this.bindings[name];
     } else if (this.base) {
@@ -189,22 +36,191 @@ class Env {
   }
 }
 
-type Ops = { [name: string | symbol]: Op };
+export type Op = BuiltInOp | FnOp;
 
-type Op = BuiltInOp | DefOp;
-
-interface BuiltInOp {
+export interface BuiltInOp {
   type: OpType.builtIn;
-  fn: (...args: P.Term[]) => P.Term;
+  name: string;
+  fn: (...args: Value[]) => Value;
 }
 
-interface DefOp {
-  type: OpType.def;
+export interface FnOp {
+  type: OpType.fn;
   name: string;
   clauses: P.MatchClause[];
 }
 
-enum OpType {
+export enum OpType {
   builtIn = 'builtIn',
-  def = 'def',
+  fn = 'fn',
+}
+
+type Ops = { [name: string]: Op };
+
+export default function interpret(items: P.Item[]) {
+  const env = Env.empty();
+
+  const ops: Ops = {
+    print: {
+      type: OpType.builtIn,
+      name: 'print',
+      fn: (...terms) => {
+        console.log(...terms.map(term => JSON.stringify(term, null, 2)));
+        return {
+          functor: P.internalNil,
+          children: [],
+        };
+      },
+    },
+  };
+
+  for (const item of items) {
+    switch (item.type) {
+      case P.ItemType.fn: {
+        const { name, clauses } = item;
+        ops[name] = {
+          type: OpType.fn,
+          name,
+          clauses,
+        };
+        break;
+      }
+
+      case P.ItemType.let: {
+        const { pattern, term } = item;
+        const value = evalTerm(term, env, ops);
+        const s = match(pattern, value, {});
+        if (s !== null) {
+          env.define(s);
+        } else {
+          throw new Error('pattern match failure');
+        }
+        break;
+      }
+
+      case P.ItemType.term: {
+        const { term } = item;
+        evalTerm(term, env, ops);
+        break;
+      }
+    }
+  }
+}
+
+function evalTerm(term: P.Term, env: Env, ops: Ops): Value {
+  switch (term.type) {
+    case P.TermType.tree: {
+      const { functor, children } = term;
+
+      return {
+        functor,
+        children: children.map(child => evalTerm(child, env, ops)),
+      };
+    }
+
+    case P.TermType.var: {
+      const { text } = term;
+      return env.lookup(text);
+    }
+
+    case P.TermType.app: {
+      const { opName, rands } = term;
+
+      const args = rands.map(rand => evalTerm(rand, env, ops));
+      const op = ops[opName];
+
+      return applyOp(op, args, env, ops);
+    }
+
+    case P.TermType.match: {
+      const { terms, clauses } = term;
+
+      const args = terms.map(term => evalTerm(term, env, ops));
+      for (const clause of clauses) {
+        const { patterns, body } = clause;
+        const s = matchAll(patterns, args, {});
+        if (s) {
+          return evalTerm(body, env.extend(s), ops);
+        }
+      }
+
+      throw new Error('pattern match failure');
+    }
+  }
+}
+
+function matchAll(pats: P.Pattern[], values: Value[], s: Subst): Subst | null {
+  return zip(pats, values).reduce((s, [pat, term]) => {
+    if (s === null) {
+      return null;
+    } else {
+      return match(pat, term, s);
+    }
+  }, s as Subst | null);
+}
+
+function match(pat: P.Pattern, value: Value, s: Subst): Subst | null {
+  switch (pat.type) {
+    case P.PatternType.tree: {
+      if (
+        pat.functor === value.functor &&
+        pat.children.length === value.children.length
+      ) {
+        return matchAll(pat.children, value.children, s);
+      } else {
+        return null;
+      }
+    }
+
+    case P.PatternType.var: {
+      const { text } = pat;
+      if (text in s) {
+        return eqValues(value, s[text]) ? s : null;
+      } else {
+        return { ...s, [text]: value };
+      }
+    }
+
+    case P.PatternType.wildcard: {
+      return s;
+    }
+
+    case P.PatternType.as: {
+      const { name, pattern } = pat;
+      const s1 = match(pattern, value, s);
+      if (s1) {
+        const v = { type: P.PatternType.var as const, text: name };
+        return match(v, value, s1);
+      } else {
+        return null;
+      }
+    }
+  }
+}
+
+function eqValues(t: Value, u: Value): boolean {
+  return (
+    t.functor === u.functor &&
+    zip(t.children, u.children).every(([t, u]) => eqValues(t, u))
+  );
+}
+
+function applyOp(op: Op, args: Value[], env: Env, ops: Ops): Value {
+  switch (op.type) {
+    case OpType.builtIn:
+      return op.fn(...args);
+
+    case OpType.fn: {
+      for (const clause of op.clauses) {
+        const { patterns, body } = clause;
+        const s = matchAll(patterns, args, {});
+
+        if (s) {
+          return evalTerm(body, env.extend(s), ops);
+        }
+      }
+
+      throw new Error(`pattern match failure: ${op.name}`);
+    }
+  }
 }

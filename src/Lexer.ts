@@ -147,6 +147,7 @@ export enum Type {
   pipe = 'pipe',
   bang = 'bang',
   amp = 'amp',
+  fnKw = 'fnKw',
   letKw = 'letKw',
   matchKw = 'matchKw',
   bareAtom = 'bareAtom',
@@ -198,6 +199,8 @@ function remapType(type: Type, text: string): Type {
   switch (text) {
     case '_':
       return Type.wildcard;
+    case 'fn':
+      return Type.fnKw;
     case 'let':
       return Type.letKw;
     case 'match':

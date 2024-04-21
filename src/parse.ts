@@ -1,8 +1,9 @@
 import Lexer, { Type as TT } from './Lexer';
 
 // Program = Item*{";"}
-// Item = Def | Term
-// Def = Ident [ "(" Pattern*{","} ")" ] "=" Term
+// Item = Fn | Let | Term
+// Fn = "fn" Ident "(" Pattern*{","} ")" "=" Term
+// Let = "let" Pattern "=" Term
 //
 // Term  = Term1 [ ":" Term ]*
 // Term1 = (Atom | QuotedAtom | Ident) [ "(" Term*{","} ")" ]
@@ -21,13 +22,19 @@ import Lexer, { Type as TT } from './Lexer';
 //          | "[" Pattern*{","} "]"
 //          | "(" Pattern ")"
 
-export type Item = DefItem | TermItem;
+export type Item = FnItem | LetItem | TermItem;
 
-export interface DefItem {
-  type: ItemType.def;
+export interface FnItem {
+  type: ItemType.fn;
   name: string;
   patterns: Pattern[];
   body: Term;
+}
+
+export interface LetItem {
+  type: ItemType.let;
+  pattern: Pattern;
+  term: Term;
 }
 
 export interface TermItem {
@@ -36,7 +43,8 @@ export interface TermItem {
 }
 
 export enum ItemType {
-  def = 'def',
+  fn = 'fn',
+  let = 'let',
   term = 'term',
 }
 
@@ -171,33 +179,47 @@ export function parseProgram(l: Lexer): Item[] {
 }
 
 export function parseItem(l: Lexer): Item {
-  if (l.peek().type === TT.letKw) {
-    return parseDef(l);
+  const peeked = l.peek();
+
+  if (peeked.type === TT.fnKw) {
+    return parseFn(l);
+  } else if (peeked.type === TT.letKw) {
+    return parseLet(l);
   } else {
     return { type: ItemType.term, term: parseTerm(l) };
   }
 }
 
-export function parseDef(l: Lexer): DefItem {
-  l.expect(TT.letKw);
+export function parseFn(l: Lexer): Item {
+  l.expect(TT.fnKw);
   const name = l.expect(TT.ident).text;
 
-  let patterns: Pattern[] = [];
-  if (l.hasMore() && l.peek().type === TT.lParen) {
-    l.pop();
-    patterns = parseCommaSep(l, parsePattern, [TT.rParen]);
-    l.expect(TT.rParen);
-  }
+  l.expect(TT.lParen);
+  const patterns = parseCommaSep(l, parsePattern, [TT.rParen]);
+  l.expect(TT.rParen);
 
   l.expect(TT.eq);
 
   const body = parseTerm(l);
 
   return {
-    type: ItemType.def,
+    type: ItemType.fn,
     patterns,
     name,
     body,
+  };
+}
+
+export function parseLet(l: Lexer): Item {
+  l.expect(TT.letKw);
+  const pattern = parsePattern(l);
+  l.expect(TT.eq);
+  const term = parseTerm(l);
+
+  return {
+    type: ItemType.let,
+    pattern,
+    term,
   };
 }
 
@@ -415,9 +437,11 @@ function parseCommaSep<T>(
 
 function getStringText(text: string): string {
   const content = text.substring(1, text.length - 1);
-  if (text.startsWith("'")) {
-    return content.replace(/\\'/g, "'");
-  } else {
-    return content.replace(/\\\"/g, '"');
-  }
+  return content.replace(/\\(.)/g, (_match, c) => escapes[c] ?? c);
 }
+
+const escapes: { [c: string]: string } = {
+  t: '\t',
+  n: '\n',
+  r: '\r',
+};

@@ -1,11 +1,18 @@
 import * as Raw from './parse';
+import { groupBy, mapValues } from './tools';
 
-export type Item = DefItem | TermItem;
+export type Item = FnItem | LetItem | TermItem;
 
-export interface DefItem {
-  type: ItemType.def;
+export interface FnItem {
+  type: ItemType.fn;
   name: string;
   clauses: MatchClause[];
+}
+
+export interface LetItem {
+  type: ItemType.let;
+  pattern: Pattern;
+  term: Term;
 }
 
 export interface TermItem {
@@ -14,7 +21,8 @@ export interface TermItem {
 }
 
 export enum ItemType {
-  def = 'def',
+  fn = 'fn',
+  let = 'let',
   term = 'term',
 }
 
@@ -85,65 +93,64 @@ export enum PatternType {
   as = 'asPattern',
 }
 
+export const internalCons = Symbol('internalCons');
+export const internalNil = Symbol('internalNil');
+
 /**
  * Consolidate all pattern definitions.
  * Desugar cons, string, and list patterns to internal Cons/Nil representation.
  */
 export function lowerProgram(items: Raw.Item[]): Item[] {
-  const { defs, terms } = items.reduce(
-    ({ defs, terms }, item) => {
-      switch (item.type) {
-        case Raw.ItemType.def: {
-          const { name, patterns, body } = item;
-
-          return {
-            defs: {
-              ...defs,
-              [name]: [
-                ...(defs[name] ?? []),
-                lowerMatchClause({ patterns, body }),
-              ],
-            },
-            terms,
-          };
-        }
-        case Raw.ItemType.term: {
-          const { term } = item;
-
-          return {
-            defs,
-            terms: [
-              ...terms,
-              {
-                type: ItemType.term as const,
-                term: lowerTerm(term),
-              },
-            ],
-          };
-        }
-      }
-    },
-    {
-      defs: {} as { [name: string]: MatchClause[] },
-      terms: [] as TermItem[],
-    }
+  const fns = items.filter(
+    (item): item is Raw.FnItem => item.type === Raw.ItemType.fn
   );
 
-  return [
-    ...Object.entries(defs).map(
-      ([name, clauses]) =>
-        ({
-          type: ItemType.def,
-          name,
-          clauses,
-        } as Item)
-    ),
-    ...terms,
-  ];
-}
+  const opDefs = mapValues(groupBy(fns, 'name'), (defs, name) => ({
+    type: ItemType.fn as const,
+    name,
+    clauses: defs.map(({ patterns, body }) => ({
+      patterns: patterns.map(lowerPattern),
+      body: lowerTerm(body),
+    })),
+  }));
 
-export const internalCons = Symbol('internalCons');
-export const internalNil = Symbol('internalNil');
+  const out: Item[] = [];
+  const seenOps: Set<string> = new Set();
+
+  for (const item of items) {
+    switch (item.type) {
+      case Raw.ItemType.fn: {
+        const { name } = item;
+        if (!seenOps.has(name)) {
+          seenOps.add(name);
+          out.push(opDefs[name]);
+        }
+        break;
+      }
+
+      case Raw.ItemType.let: {
+        const { pattern, term } = item;
+        out.push({
+          type: ItemType.let,
+          pattern: lowerPattern(pattern),
+          term: lowerTerm(term),
+        });
+        break;
+      }
+
+      case Raw.ItemType.term: {
+        const { term } = item;
+        out.push({
+          type: ItemType.term,
+          term: lowerTerm(term),
+        });
+        break;
+      }
+    }
+  }
+
+  return out;
+}
 
 function lowerTerm(term: Raw.Term): Term {
   switch (term.type) {
