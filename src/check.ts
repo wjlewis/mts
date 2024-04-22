@@ -1,6 +1,6 @@
 import * as P from './lower';
 
-const builtIns = ['print'];
+const builtIns = ['display', 'print'];
 
 export function checkProgram(items: P.Item[]) {
   const opNames = items

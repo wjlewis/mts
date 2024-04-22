@@ -1,5 +1,6 @@
 import * as P from './lower';
 import { zip } from './tools';
+import { print, display } from './print';
 
 export interface Value {
   functor: string | symbol;
@@ -61,11 +62,24 @@ export default function interpret(items: P.Item[]) {
   const env = Env.empty();
 
   const ops: Ops = {
+    display: {
+      type: OpType.builtIn,
+      name: 'display',
+      fn: term => {
+        console.log(display(term));
+        return {
+          functor: P.internalNil,
+          children: [],
+        };
+      },
+    },
     print: {
       type: OpType.builtIn,
       name: 'print',
       fn: (...terms) => {
-        console.log(...terms.map(term => JSON.stringify(term, null, 2)));
+        for (const term of terms) {
+          console.log(print(term));
+        }
         return {
           functor: P.internalNil,
           children: [],
