@@ -1,86 +1,64 @@
 import * as P from './lower';
 
-const builtIns = ['display', 'print'];
-
 export function checkProgram(items: P.Item[]) {
-  const opNames = items
-    .filter<P.FnItem>((item): item is P.FnItem => item.type === P.ItemType.fn)
-    .map(({ name }) => name);
-
-  const bound = [...builtIns, ...opNames];
-
   for (const item of items) {
     switch (item.type) {
       case P.ItemType.fn:
-        checkDef(item, bound);
+        checkFn(item);
         break;
       case P.ItemType.let: {
-        const boundIn = checkLet(item, bound);
-        bound.push(...boundIn);
+        checkLet(item);
         break;
       }
       case P.ItemType.term:
-        checkTerm(item.term, bound);
+        checkTerm(item.term);
         break;
     }
   }
 }
 
-function checkDef(def: P.FnItem, bound: string[]) {
-  const { clauses } = def;
-
-  checkMatchClauses(clauses, bound);
+function checkFn(fn: P.FnItem) {
+  const { clauses } = fn;
+  checkMatchClauses(clauses);
 }
 
-function checkLet(item: P.LetItem, bound: string[]): string[] {
-  const { pattern, term } = item;
-
-  checkTerm(term, bound);
-  return varsIn(pattern);
+function checkLet(item: P.LetItem) {
+  const { term } = item;
+  checkTerm(term);
 }
 
-function checkTerm(term: P.Term, bound: string[]) {
+function checkTerm(term: P.Term) {
   switch (term.type) {
     case P.TermType.tree: {
-      return checkTerms(term.children, bound);
+      const { children } = term;
+      return checkTerms(children);
     }
 
     case P.TermType.var: {
-      const { text } = term;
-      if (!bound.includes(text)) {
-        throw new Error(`unbound var: "${text}"`);
-      }
       return;
     }
 
     case P.TermType.app: {
-      const { opName, rands } = term;
-      if (!bound.includes(opName)) {
-        throw new Error(`unbound op: "${opName}"`);
-      }
-      return checkTerms(rands, bound);
+      const { rands } = term;
+      return checkTerms(rands);
     }
 
     case P.TermType.match: {
       const { terms, clauses } = term;
-      checkTerms(terms, bound);
-      checkMatchClauses(clauses, bound, terms.length);
+      checkTerms(terms);
+      checkMatchClauses(clauses, terms.length);
       return;
     }
   }
 }
 
-function checkTerms(terms: P.Term[], bound: string[]) {
+function checkTerms(terms: P.Term[]) {
   for (const term of terms) {
-    checkTerm(term, bound);
+    checkTerm(term);
   }
 }
 
-function checkMatchClauses(
-  clauses: P.MatchClause[],
-  bound: string[],
-  n?: number
-) {
+function checkMatchClauses(clauses: P.MatchClause[], n?: number) {
   const size = n ?? clauses[0]?.patterns.length;
 
   for (const clause of clauses) {
@@ -90,19 +68,6 @@ function checkMatchClauses(
       throw new Error(`all clauses must have ${size} patterns`);
     }
 
-    checkTerm(body, [...bound, ...patterns.flatMap(varsIn)]);
-  }
-}
-
-function varsIn(pat: P.Pattern): string[] {
-  switch (pat.type) {
-    case P.PatternType.tree:
-      return pat.children.flatMap(varsIn);
-    case P.PatternType.var:
-      return [pat.text];
-    case P.PatternType.wildcard:
-      return [];
-    case P.PatternType.as:
-      return [pat.name, ...varsIn(pat.pattern)];
+    checkTerm(body);
   }
 }

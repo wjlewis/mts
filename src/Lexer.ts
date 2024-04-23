@@ -64,9 +64,7 @@ export default class Lexer {
         }
 
         const c = this.source[this.pos];
-        if (c === '\n' || c === '\r') {
-          break;
-        } else if (c === quote) {
+        if (c === quote) {
           break;
         } else if (c === '\\') {
           this.pos++;
@@ -145,7 +143,6 @@ export enum Type {
   arrow = 'arrow',
   colon = 'colon',
   pipe = 'pipe',
-  bang = 'bang',
   amp = 'amp',
   fnKw = 'fnKw',
   letKw = 'letKw',

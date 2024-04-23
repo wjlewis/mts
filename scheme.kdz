@@ -1,0 +1,200 @@
+// A little scheme.
+
+// Parser.
+fn parse(src) = match parse_expr(trim_start(src)) {
+    Parsed(expr, "") => expr,
+    _ => Fail,
+};
+
+fn parse_expr(src) = match _parse_expr(src) {
+    Parsed(x, rest) => Parsed(x, trim_start(rest)),
+    _ => Fail,
+};
+fn _parse_expr(src@(c:cs)) = match in(c, digits) {
+    T => parse_nat(src),
+    _ => match in(c, sym_starts) {
+        T => parse_sym(src),
+        _ => match c {
+            '#' => parse_bool(src),
+            '(' => parse_parend(cs),
+            '\'' => parse_quoted(cs),
+            // ' <- Fix this
+            _ => Fail,
+        },
+    },
+};
+
+let ws = " \t\n\r";
+fn trim_start(src@(c:cs)) = match in(c, ws) {
+    T => trim_start(cs),
+    _ => src,
+};
+fn trim_start("") = "";
+
+// Natural numbers.
+
+fn plus(Zero, n) = n;
+fn plus(Suc(p), n) = Suc(plus(p, n));
+
+fn times(Zero, _) = Zero;
+fn times(Suc(p), n) = plus(n, times(p, n));
+
+// Shorthand for ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'].
+let digits = "0123456789";
+ 
+let n_0 = Zero;
+let n_1 = Suc(n_0);
+let n_2 = Suc(n_1);
+let n_3 = Suc(n_2);
+let n_4 = Suc(n_3);
+let n_5 = Suc(n_4);
+let n_6 = Suc(n_5);
+let n_7 = Suc(n_6);
+let n_8 = Suc(n_7);
+let n_9 = Suc(n_8);
+let n_10 = Suc(n_9);
+
+fn to_nat('0') = n_0;
+fn to_nat('1') = n_1;
+fn to_nat('2') = n_2;
+fn to_nat('3') = n_3;
+fn to_nat('4') = n_4;
+fn to_nat('5') = n_5;
+fn to_nat('6') = n_6;
+fn to_nat('7') = n_7;
+fn to_nat('8') = n_8;
+fn to_nat('9') = n_9;
+
+fn parse_nat(src) = match _parse_nat(src, Zero) {
+    Parsed(n, rest) => Parsed(Nat(n), rest),
+    _ => Fail,
+};
+fn _parse_nat(src@(c:cs), n) = match in(c, digits) {
+    T => _parse_nat(cs, plus(to_nat(c), times(n_10, n))),
+    _ => Parsed(n, src),
+};
+fn _parse_nat("", n) = Parsed(n, "");
+
+// Symbols.
+fn append([], ys) = ys;
+fn append(x:xs, ys) = x : append(xs, ys);
+
+let sym_starts = "abcdefghijklmnopqrstuvwxyz_+-*/^";
+let sym_follows = append(sym_starts, digits);
+ 
+fn in(_, []) = F;
+fn in(x, x:_) = T;
+fn in(x, _:xs) = in(x, xs);
+
+fn parse_sym(src) = match _parse_sym(src) {
+    Parsed(text, rest) => Parsed(Sym(text), rest),
+    _ => Fail,
+};
+fn _parse_sym(src@(c:cs)) = match in(c, sym_follows) {
+    T => match _parse_sym(cs) {
+        Parsed(text, rest) => Parsed(c:text, rest),
+        _ => Parsed([c], rest),
+    },
+    _ => Parsed("", src),
+};
+fn parse_sym("") = Parsed("", "");
+
+// Booleans.
+fn parse_bool('#':'t':rest) = Parsed(Bool(True), rest);
+fn parse_bool('#':'f':rest) = Parsed(Bool(False), rest);
+fn parse_bool(_) = Fail;
+
+// Parenthesized expressions.
+fn parse_parend(')':rest) = Parsed(Nil, rest);
+fn parse_parend(src) = match parse_expr(src) {
+    Parsed(car, rest) => match parse_parend(rest) {
+        Parsed(cdr, rest) => Parsed(Cons(car, cdr), rest),
+        _ => Fail,
+    },
+    _ => Fail,
+};
+fn parse_parend("") = Fail;
+
+fn parse_quoted(src) = match parse_expr(src) {
+    Parsed(x, rest) => Parsed(Cons(Sym("quote"), Cons(x, Nil)), rest),
+    _ => Fail,
+};
+
+// Evaluation.
+fn eval(expr, env) = match expr {
+    Bool(_) => expr,
+    Nat(_) => expr,
+    Cons(Sym("quote"), quoted) => quoted,
+    Sym(text) => lookup(text, env),
+    Cons(car, cdr) => match car {
+        Sym("lambda") => eval_lambda(cdr, env),
+        Sym("if") => eval_if(cdr, env),
+        _ => eval_app(car, cdr, env),
+    },
+    _ => Fail,
+};
+
+fn lookup(name, EmptyEnv) = Fail;
+fn lookup(name, ExtEnv(param, value, base)) = match eq(name, param) {
+    T => value,
+    _ => lookup(name, base),
+};
+
+fn eq(x, x) = T;
+fn eq(_, _) = F;
+
+fn eval_lambda(Cons(params, Cons(body, Nil)), env) = Closure(param_names(params), body, env);
+
+fn param_names(Nil) = Nil;
+fn param_names(Cons(Sym(name), params)) = Cons(name, param_names(params));
+
+fn eval_if(
+    Cons(test, Cons(true_arm, Cons(false_arm, Nil))),
+    env
+) = match is_truthy(eval(test, env)) {
+    T => eval(true_arm, env),
+    _ => eval(false_arm, env),
+};
+
+fn is_truthy(Bool(False)) = F;
+fn is_truthy(Nat(Zero)) = F;
+fn is_truthy(Nil) = F;
+fn is_truthy(_) = T;
+
+fn eval_app(rator, rands, env) = apply(
+    eval(rator, env),
+    eval_rands(rands, env)
+);
+
+fn eval_rands(Nil, env) = Nil;
+fn eval_rands(Cons(rand, rands), env) = match eval(rand, env) {
+    Fail => Fail,
+    arg => match eval_rands(rands, env) {
+        Fail => Fail,
+        args => Cons(arg, args)
+    },
+};
+
+fn apply(Closure(params, body, env), args)
+    = eval(body, extend(params, args, env));
+
+fn extend(
+    Cons(param, params),
+    Cons(arg, args),
+    env,
+) = ExtEnv(param, arg, extend(params, args, env));
+fn extend(_, _, env) = env;
+
+let src = "
+((lambda (x y) x) #t #f)
+";
+let env0 = EmptyEnv;
+
+let env1 = extend(
+    Cons("a", Cons("b", Nil)),
+    Cons('1', Cons('2', Nil)),
+    EmptyEnv,
+);
+
+print(eval(parse(src), env0));
+print(env1);

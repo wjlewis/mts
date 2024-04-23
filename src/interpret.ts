@@ -141,6 +141,9 @@ function evalTerm(term: P.Term, env: Env, ops: Ops): Value {
       const { opName, rands } = term;
 
       const args = rands.map(rand => evalTerm(rand, env, ops));
+      if (!(opName in ops)) {
+        throw new Error(`undefined op: "${opName}"`);
+      }
       const op = ops[opName];
 
       return applyOp(op, args, env, ops);
